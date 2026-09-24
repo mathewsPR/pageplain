@@ -5,13 +5,55 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    groups:
+      python-dependencies:
+        patterns:
+          - "*"
+        # Group everything EXCEPT the packages below, which are excluded
+        # from the group and handled by the ignore rules instead — these
+        # are the libraries the fetch/extract pipeline depends on most
+        # directly, and a major bump can silently change behavior
+        # (TLS impersonation, extraction output), so they should never
+        # auto-open a PR without a deliberate look.
+        exclude-patterns:
+          - "curl-cffi"
+          - "trafilatura"
+          - "mcp"
+    ignore:
+      # Allow patch/minor updates for these to flow through normally via
+      # a separate, ungrouped PR (still reviewed before merge, but at
+      # least Dependabot will surface them) — just never auto-propose a
+      # major bump.
+      - dependency-name: "curl-cffi"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "trafilatura"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "mcp"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      docker-dependencies:
+        patterns:
+          - "*"
+    ignore:
+      # Don't auto-propose jumping Python minor/major versions in the
+      # base image (e.g. 3.11 -> 3.14) — pyproject.toml pins
+      # requires-python = ">=3.11" deliberately; bumping the Docker base
+      # image should be a conscious choice, not an automated one.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions-dependencies:
+        patterns:
+          - "*"
