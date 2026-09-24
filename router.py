@@ -4,7 +4,7 @@ import asyncio
 import random
 import re
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from curl_cffi.requests import AsyncSession
 from loguru import logger
@@ -16,6 +16,7 @@ from config import settings
 from extractor import html_to_result
 from models import FailureReason, ScrapeResult, Task
 from network_interceptor import NetworkInterceptor
+from security import UnsafeURLError, assert_public_host, quick_reject
 
 
 # Soft signals – often just rate-limit or light bot check; worth trying browser
@@ -71,16 +72,29 @@ class Router:
         self._http_sem = asyncio.Semaphore(settings.max_http_concurrency)
         self._warmed_domains: set[str] = set()
 
-    async def route(self, task: Task) -> ScrapeResult:
-        # Cache hit
-        cached = self.cache.get(task.url)
-        if cached and cached.success:
-            cached.reason = FailureReason.CACHED
-            cached.path_used = "cache"
-            return cached
+    async def route(self, task: Task, *, use_cache: bool = True) -> ScrapeResult:
+        # SSRF / scheme guard — reject before any cache lookup or network call.
+        try:
+            await assert_public_host(task.url)
+        except UnsafeURLError as e:
+            logger.warning(f"Blocked unsafe URL {task.url}: {e}")
+            return ScrapeResult(
+                url=task.url,
+                success=False,
+                reason=FailureReason.UNSAFE_URL,
+                error_message=f"blocked_unsafe_url: {e}",
+            )
+
+        # Cache hit (skipped when the caller wants a forced re-fetch)
+        if use_cache:
+            cached = self.cache.get(task.url)
+            if cached and cached.success:
+                cached.reason = FailureReason.CACHED
+                cached.path_used = "cache"
+                return cached
 
         # Optional warm-up: visit domain root once per domain
-        domain = urlparse(task.url).netloc
+        domain = urlparse(task.url).hostname or ""
         if settings.enable_warmup and domain and domain not in self._warmed_domains:
             await self._warmup(domain)
             self._warmed_domains.add(domain)
@@ -137,6 +151,10 @@ class Router:
         """Lightweight visit to domain root to pick up cookies / appear less cold."""
         root = f"https://{domain}/"
         try:
+            await assert_public_host(root)
+        except UnsafeURLError:
+            return
+        try:
             async with self._http_sem:
                 async with AsyncSession() as session:
                     await session.get(
@@ -154,12 +172,36 @@ class Router:
         async with self._http_sem:
             try:
                 async with AsyncSession() as session:
-                    resp = await session.get(
-                        task.url,
-                        impersonate="chrome124",
-                        timeout=settings.request_timeout,
-                        allow_redirects=True,
-                    )
+                    url = task.url
+                    resp = None
+                    # Follow redirects manually so each hop is re-checked
+                    # against the SSRF guard — a public URL redirecting to
+                    # an internal address must not be followed blindly.
+                    for _ in range(settings.max_redirects + 1):
+                        resp = await session.get(
+                            url,
+                            impersonate="chrome124",
+                            timeout=settings.request_timeout,
+                            allow_redirects=False,
+                        )
+                        if resp.status_code in (301, 302, 303, 307, 308):
+                            location = resp.headers.get("location")
+                            if not location:
+                                break
+                            next_url = urljoin(url, location)
+                            try:
+                                await assert_public_host(next_url)
+                            except UnsafeURLError as e:
+                                return ScrapeResult(
+                                    url=task.url,
+                                    success=False,
+                                    reason=FailureReason.UNSAFE_URL,
+                                    error_message=f"blocked_unsafe_redirect: {e}",
+                                )
+                            url = next_url
+                            continue
+                        break
+                    assert resp is not None
                     html = resp.text
                     kind = classify_protection(html, resp.status_code)
                     if kind == "hard":
@@ -195,6 +237,17 @@ class Router:
             page = await self.browser_pool.get_page(task.url)
             interceptor = NetworkInterceptor(page)
             await interceptor.start()
+
+            # Defense in depth: block navigation to any request whose host
+            # is a private/internal/literal IP, even if it's a client-side
+            # redirect or JS-initiated navigation we didn't see above.
+            async def _guard_route(route):
+                if quick_reject(route.request.url):
+                    await route.abort()
+                else:
+                    await route.continue_()
+
+            await page.route("**/*", _guard_route)
 
             # Human-like short pause before navigation
             await asyncio.sleep(random.uniform(0.4, 1.2))

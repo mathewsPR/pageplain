@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # Politeness
     per_domain_delay_range: Tuple[float, float] = (3.0, 8.0)
     default_domain_budget: int = 25
+    domain_budget_window_seconds: int = 86400  # budget resets daily, not forever
     respect_robots: bool = True
 
     # Timeouts
@@ -27,6 +28,10 @@ class Settings(BaseSettings):
     # Retry
     max_attempts_per_url: int = 2
     max_soft_retries: int = 2
+
+    # Security: max redirect hops the fast path will follow (each hop is
+    # re-validated against the SSRF guard before being followed)
+    max_redirects: int = 5
 
     # Paths
     data_dir: Path = Path("data")

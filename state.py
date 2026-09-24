@@ -38,14 +38,22 @@ class StateManager:
         """)
         await self._conn.execute("""
             CREATE TABLE IF NOT EXISTS domain_stats (
-                domain          TEXT PRIMARY KEY,
-                pages_fetched   INTEGER DEFAULT 0,
-                successes       INTEGER DEFAULT 0,
-                soft_failures   INTEGER DEFAULT 0,
-                hard_failures   INTEGER DEFAULT 0,
-                cooldown_until  REAL DEFAULT 0
+                domain            TEXT PRIMARY KEY,
+                pages_fetched     INTEGER DEFAULT 0,
+                successes         INTEGER DEFAULT 0,
+                soft_failures     INTEGER DEFAULT 0,
+                hard_failures     INTEGER DEFAULT 0,
+                cooldown_until    REAL DEFAULT 0,
+                budget_window_at  REAL DEFAULT 0
             )
         """)
+        # Migration for DBs created before budget_window_at existed.
+        try:
+            await self._conn.execute(
+                "ALTER TABLE domain_stats ADD COLUMN budget_window_at REAL DEFAULT 0"
+            )
+        except aiosqlite.OperationalError:
+            pass  # column already exists
         await self._conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_tasks_status_depth "
             "ON tasks(status, depth, last_attempt)"
@@ -71,7 +79,7 @@ class StateManager:
 
     async def add_task(self, url: str, depth: int = 0, parent_url: str | None = None) -> None:
         assert self._conn
-        domain = urlparse(url).netloc
+        domain = urlparse(url).hostname or ""
         await self._conn.execute(
             """
             INSERT OR IGNORE INTO tasks (url, domain, depth, status, parent_url)
@@ -108,7 +116,7 @@ class StateManager:
                     await self._conn.execute("COMMIT")
                     return None
                 now = datetime.utcnow().isoformat()
-                await self._conn.execute(
+                update_cur = await self._conn.execute(
                     """
                     UPDATE tasks
                     SET status = 'IN_PROGRESS', attempts = attempts + 1, last_attempt = ?
@@ -116,7 +124,12 @@ class StateManager:
                     """,
                     (now, row["url"]),
                 )
-                if self._conn.total_changes == 0:
+                # update_cur.rowcount, not conn.total_changes (a lifetime
+                # counter for the whole connection, so it's never 0 and
+                # this guard never actually fired). rowcount == 0 means
+                # another worker claimed this URL between our SELECT and
+                # UPDATE — retry instead of returning a task nobody holds.
+                if update_cur.rowcount == 0:
                     await self._conn.execute("ROLLBACK")
                     continue
                 await self._conn.execute("COMMIT")
@@ -153,7 +166,12 @@ class StateManager:
         await self._conn.commit()
 
     async def record_domain_result(self, domain: str, reason: FailureReason) -> None:
-        """Update success/failure counts and apply cool-down on repeated hard failures."""
+        """Update success/failure counts and apply cool-down on repeated hard
+        failures. NOTE: this does NOT touch pages_fetched — that counter is
+        owned solely by increment_domain(), which callers must invoke once
+        per attempt (for the budget check) before calling this method.
+        Incrementing it here too was a bug that double-counted every page
+        and made the domain budget roughly half its configured size."""
         assert self._conn
         await self._conn.execute(
             """
@@ -165,20 +183,12 @@ class StateManager:
         )
         if reason == FailureReason.SUCCESS or reason == FailureReason.CACHED:
             await self._conn.execute(
-                """
-                UPDATE domain_stats
-                SET pages_fetched = pages_fetched + 1, successes = successes + 1
-                WHERE domain = ?
-                """,
+                "UPDATE domain_stats SET successes = successes + 1 WHERE domain = ?",
                 (domain,),
             )
         elif reason == FailureReason.CAPTCHA:
             await self._conn.execute(
-                """
-                UPDATE domain_stats
-                SET pages_fetched = pages_fetched + 1, hard_failures = hard_failures + 1
-                WHERE domain = ?
-                """,
+                "UPDATE domain_stats SET hard_failures = hard_failures + 1 WHERE domain = ?",
                 (domain,),
             )
             # Cool-down after N hard failures
@@ -203,16 +213,7 @@ class StateManager:
             FailureReason.ERROR,
         ):
             await self._conn.execute(
-                """
-                UPDATE domain_stats
-                SET pages_fetched = pages_fetched + 1, soft_failures = soft_failures + 1
-                WHERE domain = ?
-                """,
-                (domain,),
-            )
-        else:
-            await self._conn.execute(
-                "UPDATE domain_stats SET pages_fetched = pages_fetched + 1 WHERE domain = ?",
+                "UPDATE domain_stats SET soft_failures = soft_failures + 1 WHERE domain = ?",
                 (domain,),
             )
         await self._conn.commit()
@@ -228,14 +229,39 @@ class StateManager:
         return float(row["cooldown_until"] or 0) > time.time()
 
     async def increment_domain(self, domain: str) -> int:
+        """Increment and return the domain's page count for the *current*
+        budget window. The budget resets after domain_budget_window_seconds
+        instead of accumulating forever — without this, any domain that
+        ever hit the lifetime budget stayed blocked permanently, across
+        every future run."""
         assert self._conn
-        await self._conn.execute(
+        now = time.time()
+        cur = await self._conn.execute(
             """
-            INSERT INTO domain_stats (domain, pages_fetched) VALUES (?, 1)
-            ON CONFLICT(domain) DO UPDATE SET pages_fetched = pages_fetched + 1
+            INSERT INTO domain_stats (domain, pages_fetched, budget_window_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT(domain) DO NOTHING
             """,
-            (domain,),
+            (domain, now),
         )
+        if cur.rowcount == 0:
+            # Row already existed — either bump the window counter, or
+            # reset it if the current budget window has expired.
+            async with self._conn.execute(
+                "SELECT budget_window_at FROM domain_stats WHERE domain = ?", (domain,)
+            ) as sel:
+                row = await sel.fetchone()
+            window_at = float(row["budget_window_at"] or 0) if row else 0.0
+            if (now - window_at) >= settings.domain_budget_window_seconds:
+                await self._conn.execute(
+                    "UPDATE domain_stats SET pages_fetched = 1, budget_window_at = ? WHERE domain = ?",
+                    (now, domain),
+                )
+            else:
+                await self._conn.execute(
+                    "UPDATE domain_stats SET pages_fetched = pages_fetched + 1 WHERE domain = ?",
+                    (domain,),
+                )
         await self._conn.commit()
         async with self._conn.execute(
             "SELECT pages_fetched FROM domain_stats WHERE domain = ?", (domain,)

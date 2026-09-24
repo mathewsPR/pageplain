@@ -19,7 +19,7 @@ from service import service
 app = FastAPI(
     title="Pageplain API",
     description="Phase 1 team API — jobs, scrape, cache, policy, usage",
-    version="1.0.0",
+    version="1.0.0-rc.2",
 )
 
 STATIC = Path(__file__).parent / "static"
@@ -56,8 +56,20 @@ class PolicyBody(BaseModel):
 async def _startup() -> None:
     raw = api_keys.ensure_bootstrap_key()
     if raw:
-        # Print once for operator
-        print(f"[auth] Bootstrap API key (save it): {raw}", flush=True)
+        # Write once to a local, operator-only file (0600) rather than only
+        # stdout — stdout is convenient for a first local run but lands in
+        # container/orchestrator logs in any shared deployment.
+        key_path = Path(api_keys.path).parent / "bootstrap_key.txt"
+        try:
+            key_path.write_text(raw + "\n", encoding="utf-8")
+            os.chmod(key_path, 0o600)
+            print(
+                f"[auth] Bootstrap API key written to {key_path} "
+                "(0600). Read it once, then delete the file.",
+                flush=True,
+            )
+        except Exception:
+            print(f"[auth] Bootstrap API key (save it, do not log it): {raw}", flush=True)
     await service.start()
 
 

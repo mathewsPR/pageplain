@@ -108,21 +108,73 @@ async function doJob() {
   document.getElementById('jobOut').textContent = JSON.stringify(data, null, 2);
   refreshJobs();
 }
+async function downloadExport(jobId) {
+  // Plain <a href> can't carry the Authorization header, so the export
+  // must be fetched here and turned into a blob download instead.
+  const r = await fetch(`/v1/jobs/${encodeURIComponent(jobId)}/export`, { headers: headers() });
+  if (!r.ok) { alert(`Export failed: ${r.status}`); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${jobId}_export.zip`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+function refreshJobs_empty(body) {
+  body.replaceChildren();
+  const tr = document.createElement('tr');
+  const td = document.createElement('td');
+  td.colSpan = 6;
+  td.className = 'muted';
+  td.textContent = 'No jobs';
+  tr.appendChild(td);
+  body.appendChild(tr);
+}
+
 async function refreshJobs() {
   const data = await api('/v1/jobs');
   const body = document.getElementById('jobsBody');
   if (!data.jobs || !data.jobs.length) {
-    body.innerHTML = '<tr><td colspan="6" class="muted">No jobs</td></tr>';
+    refreshJobs_empty(body);
     return;
   }
-  body.innerHTML = data.jobs.map(j => `<tr>
-    <td><code>${j.id}</code></td>
-    <td>${j.name || ''}</td>
-    <td class="${j.status==='completed'?'ok':(j.status==='failed'?'err':'')}">${j.status}</td>
-    <td>${j.result_count ?? 0}</td>
-    <td class="muted">${(j.created_at||'').slice(0,19)}</td>
-    <td><a style="color:var(--acc)" href="/v1/jobs/${j.id}/export" onclick="this.href+=''; this.href=this.href.split('?')[0]; return true;">export</a></td>
-  </tr>`).join('');
+  // Built with textContent, not innerHTML — job names and ids come from
+  // stored data and must never be interpreted as HTML.
+  body.replaceChildren(...data.jobs.map(j => {
+    const tr = document.createElement('tr');
+
+    const idTd = document.createElement('td');
+    const idCode = document.createElement('code');
+    idCode.textContent = j.id;
+    idTd.appendChild(idCode);
+
+    const nameTd = document.createElement('td');
+    nameTd.textContent = j.name || '';
+
+    const statusTd = document.createElement('td');
+    statusTd.textContent = j.status;
+    statusTd.className = j.status === 'completed' ? 'ok' : (j.status === 'failed' ? 'err' : '');
+
+    const countTd = document.createElement('td');
+    countTd.textContent = j.result_count ?? 0;
+
+    const createdTd = document.createElement('td');
+    createdTd.className = 'muted';
+    createdTd.textContent = (j.created_at || '').slice(0, 19);
+
+    const exportTd = document.createElement('td');
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'export';
+    exportBtn.style.color = 'var(--acc)';
+    exportBtn.onclick = () => downloadExport(j.id);
+    exportTd.appendChild(exportBtn);
+
+    tr.append(idTd, nameTd, statusTd, countTd, createdTd, exportTd);
+    return tr;
+  }));
 }
 async function refreshAll() {
   document.getElementById('usageOut').textContent = JSON.stringify(await api('/v1/usage'), null, 2);

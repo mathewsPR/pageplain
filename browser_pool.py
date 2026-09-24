@@ -205,7 +205,7 @@ class BrowserPool:
         return False
 
     async def get_page(self, url: str | None = None) -> Page:
-        domain = urlparse(url).netloc if url else None
+        domain = (urlparse(url).hostname or None) if url else None
         await self._semaphore.acquire()
         try:
             async with self._lock:

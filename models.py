@@ -18,6 +18,7 @@ class FailureReason(str, Enum):
     PENDING = "PENDING"
     COOLDOWN = "COOLDOWN"            # domain in cool-down
     SKIPPED_HARD = "SKIPPED_HARD"    # domain tier = hard, skipped
+    UNSAFE_URL = "UNSAFE_URL"        # blocked by the scheme/SSRF guard
 
 
 class DomainTier(str, Enum):

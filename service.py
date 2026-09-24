@@ -133,9 +133,9 @@ class KnowledgeService:
                     "chars": len(md),
                 }
 
-        domain = urlparse(url).netloc
+        domain = urlparse(url).hostname or ""
         task = Task(url=url, domain=domain, depth=0)
-        result = await self.crawler.process(task)
+        result = await self.crawler.process(task, use_cache=not force_refresh)
         md = _truncate(result.markdown or result.content, max_chars) if result.success else ""
         usage.record_scrape(result.success, from_cache=False, bytes_out=len(md))
 

@@ -1,7 +1,7 @@
 services:
   scraper:
     build: .
-    image: pageplain:1.0.0-rc.1
+    image: pageplain:1.0.0-rc.2
     ports:
       - "8080:8080"
     environment:

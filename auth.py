@@ -7,6 +7,8 @@ import secrets
 from pathlib import Path
 from typing import List, Optional
 
+from loguru import logger
+
 from config import settings
 
 
@@ -14,14 +16,27 @@ class ApiKeyStore:
     def __init__(self, path: Optional[Path] = None) -> None:
         self.path = path or (settings.data_dir / "api_keys.json")
         self.keys: dict[str, dict] = {}  # hash -> meta
+        # True only when the file exists but failed to parse. In that case
+        # verify() must fail closed — a corrupt store is not the same thing
+        # as "no keys configured yet" (which is an intentional open-dev-mode
+        # default) and must never silently become an open API.
+        self._corrupt = False
         self._load()
 
     def _load(self) -> None:
-        if self.path.exists():
-            try:
-                self.keys = json.loads(self.path.read_text(encoding="utf-8"))
-            except Exception:
-                self.keys = {}
+        if not self.path.exists():
+            self.keys = {}
+            return
+        try:
+            self.keys = json.loads(self.path.read_text(encoding="utf-8"))
+        except Exception as e:
+            logger.error(
+                f"API key store at {self.path} is corrupt ({e}). "
+                "Failing closed: all requests will be rejected until the "
+                "file is restored or deleted."
+            )
+            self.keys = {}
+            self._corrupt = True
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -38,8 +53,12 @@ class ApiKeyStore:
         return raw
 
     def verify(self, raw: Optional[str]) -> bool:
+        if self._corrupt:
+            return False
         if not self.keys:
-            # No keys configured → open (dev mode)
+            # No keys file at all → open (dev mode). This is intentional
+            # for local/dev use; set at least one key before exposing the
+            # API beyond localhost.
             return True
         if not raw:
             return False
@@ -50,8 +69,12 @@ class ApiKeyStore:
         return [{"name": v["name"], "prefix": v.get("prefix", "")} for v in self.keys.values()]
 
     def ensure_bootstrap_key(self) -> Optional[str]:
-        """Create a bootstrap key if none exist; return raw key once."""
-        if self.keys:
+        """Create a bootstrap key if none exist; return raw key once.
+        Caller is responsible for how it's surfaced — printing it to stdout
+        is convenient for local use but will land in container/orchestrator
+        logs, so avoid that in a shared or production deployment; write it
+        to a file with restricted permissions instead."""
+        if self.keys or self._corrupt:
             return None
         return self.create("bootstrap")
 

@@ -9,6 +9,7 @@ from loguru import logger
 from curl_cffi.requests import AsyncSession
 
 from config import settings
+from security import UnsafeURLError, assert_public_host
 
 
 class RobotsManager:
@@ -25,6 +26,12 @@ class RobotsManager:
             if base not in self._parsers:
                 rp = RobotFileParser()
                 robots_url = urljoin(base, "/robots.txt")
+                try:
+                    await assert_public_host(robots_url)
+                except UnsafeURLError:
+                    rp.parse([])
+                    self._parsers[base] = rp
+                    return rp.can_fetch(user_agent, url)
                 try:
                     async with AsyncSession() as session:
                         resp = await session.get(robots_url, impersonate="chrome124", timeout=10)

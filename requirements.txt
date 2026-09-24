@@ -1,4 +1,4 @@
-# v1.0.0-rc.1 — pin loosely for compatibility; browsers via ensure_browsers.sh
+# v1.0.0-rc.2 — pin loosely for compatibility; browsers via ensure_browsers.sh
 playwright>=1.48.0,<2
 curl_cffi>=0.7.1,<1
 trafilatura>=1.12.2,<3

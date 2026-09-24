@@ -3,8 +3,7 @@ FROM python:3.11-slim-bookworm
 ENV PYTHONUNBUFFERED=1 \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     DEBIAN_FRONTEND=noninteractive \
-    # Prefer local Camoufox cache path inside image
-    HOME=/root
+    HOME=/home/scraper
 
 WORKDIR /app
 
@@ -22,8 +21,19 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium || true
 RUN python -m camoufox fetch || echo "WARN: camoufox fetch failed at build; mount ~/.cache/camoufox at runtime"
 
+# .dockerignore excludes data/, __pycache__, .git, and other runtime/dev
+# files, so COPY . . cannot pull crawl output, cookies, or logs into the
+# image — see .dockerignore.
 COPY . .
 RUN mkdir -p /app/data/output /app/data/cache /app/data/storage_state /app/data/profiles /app/data/jobs
+
+# Run as a non-root user. Chromium still needs --no-sandbox in most
+# container runtimes (no user namespace for the sandbox setuid helper), but
+# not running as root limits what a compromised browser process can reach
+# on the host filesystem.
+RUN useradd --create-home --uid 1000 scraper \
+    && chown -R scraper:scraper /app /ms-playwright $HOME
+USER scraper
 
 # Optional: copy pre-fetched host cache if provided as build context volume
 # docker build --build-arg ... or mount -v $HOME/.cache/camoufox:/root/.cache/camoufox

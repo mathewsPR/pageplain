@@ -13,7 +13,9 @@ from cache import ContentCache
 
 
 def _is_hard_domain(domain: str) -> bool:
-    d = domain.lower().removeprefix("www.")
+    # domain must already be a bare hostname (no port/userinfo) — callers
+    # pass urlparse(url).hostname, never .netloc.
+    d = (domain or "").lower().removeprefix("www.")
     if d in DEFAULT_HARD_DOMAINS:
         return True
     # suffix match e.g. de.indeed.com
@@ -36,8 +38,8 @@ class Crawler:
         self.robots = robots
         self.cache = cache
 
-    async def process(self, task: Task) -> ScrapeResult:
-        domain = task.domain or urlparse(task.url).netloc
+    async def process(self, task: Task, *, use_cache: bool = True) -> ScrapeResult:
+        domain = task.domain or (urlparse(task.url).hostname or "")
 
         # Tier 1: skip known hard domains on free tier
         if settings.skip_hard_domains and _is_hard_domain(domain):
@@ -77,7 +79,7 @@ class Crawler:
                 url=task.url, success=False, reason=FailureReason.BUDGET_EXCEEDED
             )
 
-        result = await self.router.route(task)
+        result = await self.router.route(task, use_cache=use_cache)
 
         if settings.research_mode and result.success:
             result.research = {
@@ -96,7 +98,7 @@ class Crawler:
         if result.success and task.depth < settings.max_depth and result.links:
             base_domain = domain
             for link in result.links:
-                link_domain = urlparse(link).netloc
+                link_domain = urlparse(link).hostname or ""
                 if settings.same_domain_only and link_domain != base_domain:
                     continue
                 if settings.skip_hard_domains and _is_hard_domain(link_domain):

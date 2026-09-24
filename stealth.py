@@ -6,10 +6,19 @@ def get_launch_args() -> List[str]:
     return [
         "--disable-blink-features=AutomationControlled",
         "--disable-dev-shm-usage",
+        # --no-sandbox is required to run Chromium as root inside a
+        # container without a dedicated seccomp/user-namespace setup. Prefer
+        # running the container as a non-root user (see Dockerfile) so the
+        # Chromium sandbox itself can stay enabled; only fall back to
+        # --no-sandbox if your deployment truly cannot avoid running as root.
         "--no-sandbox",
         "--disable-setuid-sandbox",
         "--disable-infobars",
-        "--ignore-certificate-errors",
+        # NOTE: --ignore-certificate-errors was removed. It silently accepts
+        # invalid/self-signed TLS certs on every site, which defeats TLS
+        # verification and makes MITM interception undetectable. If a
+        # specific internal/self-signed target needs this, opt in per-domain
+        # rather than globally.
         "--disable-features=IsolateOrigins,site-per-process",
     ]
 

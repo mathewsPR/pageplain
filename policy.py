@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from config import settings
 from models import DEFAULT_HARD_DOMAINS
+from security import quick_reject
 
 
 class DomainPolicy:
@@ -52,7 +53,13 @@ class DomainPolicy:
 
     def check_url(self, url: str) -> tuple[bool, str]:
         """Returns (allowed, reason)."""
-        domain = self._norm(urlparse(url).netloc)
+        unsafe = quick_reject(url)
+        if unsafe:
+            return False, unsafe
+        # hostname (not netloc) — netloc includes port/userinfo, which lets
+        # "example.com:443" or "user@example.com" slip past a denylist
+        # entry for "example.com".
+        domain = self._norm(urlparse(url).hostname or "")
         if not domain:
             return False, "invalid_url"
         if domain in self.denylist or any(

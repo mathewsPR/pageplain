@@ -1,4 +1,4 @@
-# pageplain v1.0.0-rc.1
+# pageplain v1.0.0-rc.2
 
 Self-hosted web knowledge gateway for research and LLM agents (MCP + REST).
 
@@ -62,11 +62,11 @@ python mcp_server.py
 ## Docker
 
 ```bash
-docker build -t pageplain:1.0.0-rc.1 .
+docker build -t pageplain:1.0.0-rc.2 .
 docker run --rm -p 8080:8080 \
   -v "$HOME/.cache/camoufox:/root/.cache/camoufox" \
   -v "$PWD/data:/app/data" \
-  pageplain:1.0.0-rc.1
+  pageplain:1.0.0-rc.2
 ```
 
 ## MCP client snippet
