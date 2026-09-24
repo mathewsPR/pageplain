@@ -8,9 +8,39 @@ requires-python = ">=3.11"
 authors = [{ name = "Pageplain contributors" }]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USER/pageplain"
-Changelog = "https://github.com/YOUR_USER/pageplain/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/mathewsPR/pageplain"
+Changelog = "https://github.com/mathewsPR/pageplain/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mathewsPR/pageplain/issues"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.3,<9",
+    "pytest-asyncio>=0.24.0,<2",
+    "ruff>=0.7.0",
+    "bandit>=1.7.10",
+    "pip-audit>=2.7.3",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = ["data", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+# E, F = pyflakes/pycodestyle core correctness
+# I    = import sorting (isort-equivalent)
+# UP   = pyupgrade — flags typing.Dict/Optional/etc. in favor of 3.11-native syntax
+# B    = flake8-bugbear — catches common real bugs (mutable default args, etc.)
+# SIM  = flake8-simplify — flags needlessly complex code
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B", "SIM"]  # test fixtures/mocks legitimately break some of these rules
+
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "data"]
+skips = ["B101"]  # B101 = assert used; fine in tests, and pytest asserts trip this everywhere
