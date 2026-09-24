@@ -1,0 +1,20 @@
+services:
+  scraper:
+    build: .
+    image: pageplain:1.0.0-rc.1
+    ports:
+      - "8080:8080"
+    environment:
+      - SCRAPER_CAMOUFOX_PRESET=fast
+      - SCRAPER_MAX_HTTP_CONCURRENCY=16
+      - SCRAPER_MAX_BROWSER_CONCURRENCY=1
+      - SCRAPER_SKIP_HARD_DOMAINS=true
+      - SCRAPER_DATA_DIR=/app/data
+    volumes:
+      - scraper_data:/app/data
+      - ${HOME}/.cache/camoufox:/root/.cache/camoufox
+    mem_limit: 6g
+    restart: unless-stopped
+
+volumes:
+  scraper_data:

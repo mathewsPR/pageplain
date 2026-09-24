@@ -1,0 +1,16 @@
+[project]
+name = "pageplain"
+version = "1.0.0rc1"
+description = "Self-hosted web knowledge gateway — pages to clean markdown for AI agents (MCP + REST)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [{ name = "Pageplain contributors" }]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USER/pageplain"
+Changelog = "https://github.com/YOUR_USER/pageplain/blob/main/CHANGELOG.md"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

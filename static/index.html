@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pageplain — Admin</title>
+  <style>
+    :root { --bg:#0f1419; --card:#1a2332; --text:#e7ecf3; --muted:#8b9bb4; --acc:#3b82f6; --ok:#22c55e; --err:#ef4444; }
+    * { box-sizing: border-box; }
+    body { font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 1.5rem; }
+    h1 { font-size: 1.35rem; margin: 0 0 1rem; }
+    h2 { font-size: 1rem; color: var(--muted); margin: 1.5rem 0 0.5rem; text-transform: uppercase; letter-spacing: .04em; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; align-items: end; margin-bottom: 1rem; }
+    label { display: block; font-size: .75rem; color: var(--muted); margin-bottom: .25rem; }
+    input, textarea { background: #0b1016; border: 1px solid #2a3548; color: var(--text); padding: .5rem .65rem; border-radius: 6px; width: 100%; }
+    textarea { min-height: 80px; font-family: ui-monospace, monospace; font-size: .85rem; }
+    button { background: var(--acc); color: #fff; border: none; padding: .55rem 1rem; border-radius: 6px; cursor: pointer; font-weight: 600; }
+    button.secondary { background: #334155; }
+    .card { background: var(--card); border-radius: 10px; padding: 1rem 1.15rem; margin-bottom: 1rem; border: 1px solid #243044; }
+    pre { background: #0b1016; padding: .75rem; border-radius: 6px; overflow: auto; font-size: .8rem; max-height: 320px; }
+    table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+    th, td { text-align: left; padding: .4rem .5rem; border-bottom: 1px solid #243044; }
+    .ok { color: var(--ok); } .err { color: var(--err); }
+    .muted { color: var(--muted); font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <h1>Pageplain — Admin</h1>
+  <p class="muted">Phase 1 team console. API key required for /v1/* (leave empty if no keys configured yet).</p>
+
+  <div class="card">
+    <div class="row">
+      <div style="flex:1;min-width:200px">
+        <label>API key</label>
+        <input id="apiKey" type="password" placeholder="sk_… or empty in dev" />
+      </div>
+      <button type="button" onclick="refreshAll()">Refresh</button>
+    </div>
+  </div>
+
+  <h2>Scrape URL</h2>
+  <div class="card">
+    <div class="row">
+      <div style="flex:2;min-width:240px">
+        <label>URL</label>
+        <input id="scrapeUrl" placeholder="https://example.com" value="https://example.com" />
+      </div>
+      <button type="button" onclick="doScrape()">Scrape</button>
+    </div>
+    <pre id="scrapeOut">—</pre>
+  </div>
+
+  <h2>Create job</h2>
+  <div class="card">
+    <label>URLs (one per line)</label>
+    <textarea id="jobUrls">https://example.com
+https://mageoai.com/</textarea>
+    <div class="row" style="margin-top:.75rem">
+      <div>
+        <label>Max pages</label>
+        <input id="maxPages" type="number" value="5" style="width:5rem" />
+      </div>
+      <div>
+        <label>Name</label>
+        <input id="jobName" value="admin-job" />
+      </div>
+      <button type="button" onclick="doJob()">Create job</button>
+    </div>
+    <pre id="jobOut">—</pre>
+  </div>
+
+  <h2>Jobs</h2>
+  <div class="card">
+    <table>
+      <thead><tr><th>ID</th><th>Name</th><th>Status</th><th>Results</th><th>Created</th><th></th></tr></thead>
+      <tbody id="jobsBody"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+    </table>
+  </div>
+
+  <h2>Usage</h2>
+  <div class="card"><pre id="usageOut">—</pre></div>
+
+  <h2>Policy</h2>
+  <div class="card"><pre id="policyOut">—</pre></div>
+
+<script>
+const key = () => document.getElementById('apiKey').value.trim();
+function headers() {
+  const h = { 'Content-Type': 'application/json' };
+  if (key()) h['Authorization'] = 'Bearer ' + key();
+  return h;
+}
+async function api(path, opts = {}) {
+  const r = await fetch(path, { ...opts, headers: { ...headers(), ...(opts.headers || {}) } });
+  const t = await r.text();
+  try { return JSON.parse(t); } catch { return { ok: false, raw: t, status: r.status }; }
+}
+async function doScrape() {
+  const url = document.getElementById('scrapeUrl').value.trim();
+  const data = await api('/v1/scrape', { method: 'POST', body: JSON.stringify({ url, max_chars: 8000 }) });
+  document.getElementById('scrapeOut').textContent = JSON.stringify(data, null, 2);
+}
+async function doJob() {
+  const urls = document.getElementById('jobUrls').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const max_pages = parseInt(document.getElementById('maxPages').value || '5', 10);
+  const name = document.getElementById('jobName').value || 'job';
+  const data = await api('/v1/jobs', { method: 'POST', body: JSON.stringify({ urls, max_pages, name }) });
+  document.getElementById('jobOut').textContent = JSON.stringify(data, null, 2);
+  refreshJobs();
+}
+async function refreshJobs() {
+  const data = await api('/v1/jobs');
+  const body = document.getElementById('jobsBody');
+  if (!data.jobs || !data.jobs.length) {
+    body.innerHTML = '<tr><td colspan="6" class="muted">No jobs</td></tr>';
+    return;
+  }
+  body.innerHTML = data.jobs.map(j => `<tr>
+    <td><code>${j.id}</code></td>
+    <td>${j.name || ''}</td>
+    <td class="${j.status==='completed'?'ok':(j.status==='failed'?'err':'')}">${j.status}</td>
+    <td>${j.result_count ?? 0}</td>
+    <td class="muted">${(j.created_at||'').slice(0,19)}</td>
+    <td><a style="color:var(--acc)" href="/v1/jobs/${j.id}/export" onclick="this.href+=''; this.href=this.href.split('?')[0]; return true;">export</a></td>
+  </tr>`).join('');
+}
+async function refreshAll() {
+  document.getElementById('usageOut').textContent = JSON.stringify(await api('/v1/usage'), null, 2);
+  document.getElementById('policyOut').textContent = JSON.stringify(await api('/v1/policy'), null, 2);
+  await refreshJobs();
+}
+refreshAll();
+setInterval(refreshJobs, 5000);
+</script>
+</body>
+</html>

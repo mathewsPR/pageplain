@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.python-version
+
+# Test / cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data (do not commit crawl output)
+data/
+!data/.gitkeep
+*.db
+*.db-shm
+*.db-wal
+
+# Browsers / local caches
+.cache/
+playwright-report/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Secrets
+api_keys.json
+*.pem
