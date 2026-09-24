@@ -1,6 +1,6 @@
 # v1.0.0-rc.2 — pin loosely for compatibility; browsers via ensure_browsers.sh
 playwright>=1.48.0,<2
-curl_cffi>=0.7.1,<1
+curl_cffi>=0.16.3,<1
 trafilatura>=1.12.2,<3
 pydantic>=2.9.2,<3
 pydantic-settings>=2.5.2,<3
